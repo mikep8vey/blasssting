@@ -1,0 +1,7 @@
+# Example only.
+# Never put real contact lists in GitHub.
+# One authorized recipient per line.
+
++15551234567
++15557654321
++15559876543
