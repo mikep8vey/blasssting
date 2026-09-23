@@ -1,2 +1,0 @@
-# One authorized recipient per line
-+15551234567
