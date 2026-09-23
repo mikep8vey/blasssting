@@ -1,0 +1,15 @@
+[Unit]
+Description=UnderHaven Blaster
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/blasssting/underhaven-blaster
+EnvironmentFile=/root/blasssting/underhaven-blaster/.env
+ExecStart=/root/blasssting/underhaven-blaster/venv/bin/python /root/blasssting/underhaven-blaster/main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
