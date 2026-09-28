@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UnderHaven Blaster</title>
+<link rel="icon" href="{{ url_for('static', filename='favicon.jpg') }}">
+<style>
+*{box-sizing:border-box}body{margin:0;background:#050e1d;color:#edf5ff;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}
+header{height:76px;border-bottom:1px solid #1b3458;background:#08152b;display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:2}
+.brand{display:flex;align-items:center;gap:12px;font-weight:850;letter-spacing:.05em}.brand img{width:43px;height:43px;border-radius:11px;object-fit:cover}
+.logout{background:#101f39;border:1px solid #2b456b;color:#bcd0e8;padding:9px 13px;border-radius:9px;cursor:pointer}
+main{max-width:1180px;margin:30px auto;padding:0 20px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.panel{background:#0a1730;border:1px solid #203d68;border-radius:18px;padding:22px;box-shadow:0 15px 50px #0004}
+h2{margin:0 0 17px;font-size:17px}.muted{color:#8297b5;font-size:13px}.status{padding:13px;border-radius:12px;background:#071126;border:1px solid #1f3b63;margin-bottom:14px}
+.row{display:flex;gap:10px}.row>*{flex:1}label{display:block;color:#9db0cc;font-size:12px;margin:12px 0 6px}input,textarea{width:100%;border:1px solid #29466f;background:#061126;color:#fff;border-radius:10px;padding:11px;font:inherit}textarea{min-height:110px;resize:vertical}
+button{border:0;border-radius:10px;padding:11px 15px;font-weight:750;cursor:pointer;background:#18dfe9;color:#04101d}.secondary{background:#132744;color:#cce0f6;border:1px solid #2a476d}.danger{background:#64253b;color:#fff}.full{width:100%;margin-top:13px}
+.good{color:#48f0c3}.bad{color:#ff8099}.warn{color:#ffd16a}.progress{height:10px;background:#071126;border-radius:10px;overflow:hidden;margin:14px 0}.bar{height:100%;width:0;background:linear-gradient(90deg,#13e4ee,#246cff);transition:width .3s}
+@media(max-width:800px){.grid{grid-template-columns:1fr}header{padding:0 15px}}
+</style>
+</head>
+<body>
+<header>
+<div class="brand"><img src="{{ url_for('static', filename='logo.jpg') }}">UNDERHAVEN BLASTER</div>
+<form method="post" action="{{ url_for('logout') }}"><button class="logout">Sign out</button></form>
+</header>
+<main>
+<div class="grid">
+<section class="panel">
+<h2>Textbelt connection</h2>
+<div id="apiStatus" class="status">Checking API configuration...</div>
+<label>Textbelt API key</label>
+<input id="apiKey" type="password" placeholder="Enter your Textbelt API key">
+<div class="row">
+<button onclick="saveKey()">Save & Verify</button>
+<button class="secondary" onclick="refreshStatus()">Check Quota</button>
+</div>
+<p class="muted">The key is stored server-side in the protected .env file. Quota is checked through Textbelt's quota endpoint.</p>
+</section>
+
+<section class="panel">
+<h2>Contacts</h2>
+<div class="status"><strong id="contacts">{{ contacts_count }}</strong> contacts loaded from <code>contacts.txt</code>.</div>
+<p class="muted">Use one authorized recipient per line. Keep your real contact file off GitHub.</p>
+</section>
+
+<section class="panel">
+<h2>Message campaign</h2>
+<label>Message 1</label><textarea class="msg"></textarea>
+<label>Message 2</label><textarea class="msg"></textarea>
+<label>Message 3</label><textarea class="msg"></textarea>
+<label>Message 4</label><textarea class="msg"></textarea>
+<label>Message 5</label><textarea class="msg"></textarea>
+<label>Delay between messages (seconds)</label>
+<input id="delay" type="number" min="1" step="0.1" value="1">
+<p class="muted">If multiple messages are supplied, one is selected randomly for each contact. The minimum delay is 1 second.</p>
+<button class="full" onclick="startCampaign()">Start Campaign</button>
+<button class="full danger" onclick="stopCampaign()">Stop Campaign</button>
+</section>
+
+<section class="panel">
+<h2>Campaign status</h2>
+<div class="status" id="campaignMessage">Ready.</div>
+<div class="progress"><div id="bar" class="bar"></div></div>
+<div class="row">
+<div class="status">Sent<br><strong id="sent">0</strong></div>
+<div class="status">Failed<br><strong id="failed">0</strong></div>
+<div class="status">Total<br><strong id="total">0</strong></div>
+</div>
+<div class="muted" id="current"></div>
+</section>
+</div>
+</main>
+<script>
+async function refreshStatus(){
+  const r=await fetch('/api/status'); const d=await r.json();
+  const el=document.getElementById('apiStatus');
+  if(!d.configured){el.innerHTML='<span class="warn">● API key not configured</span>';return}
+  if(d.success){el.innerHTML='<span class="good">● Connected</span> &nbsp; Quota remaining: <strong>'+((d.quotaRemaining ?? 'unknown'))+'</strong>'}
+  else{el.innerHTML='<span class="bad">● API check failed</span> '+(d.error||'')}
+}
+async function saveKey(){
+  const key=document.getElementById('apiKey').value.trim();
+  if(!key){alert('Enter a Textbelt API key.');return}
+  const r=await fetch('/api/textbelt/key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_key:key})});
+  const d=await r.json(); alert(d.message||d.error||'Done'); if(d.success){document.getElementById('apiKey').value='';refreshStatus()}
+}
+async function startCampaign(){
+  const messages=[...document.querySelectorAll('.msg')].map(x=>x.value.trim()).filter(Boolean);
+  const delay=parseFloat(document.getElementById('delay').value||'1');
+  if(!messages.length){alert('Enter at least one message.');return}
+  const r=await fetch('/api/campaign/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages,delay})});
+  const d=await r.json(); if(!d.success){alert(d.error||'Unable to start');return} poll();
+}
+async function stopCampaign(){await fetch('/api/campaign/stop',{method:'POST'});poll()}
+async function poll(){
+  const r=await fetch('/api/campaign/status'); const d=await r.json();
+  document.getElementById('campaignMessage').textContent=d.message||'Ready.';
+  document.getElementById('sent').textContent=d.sent;
+  document.getElementById('failed').textContent=d.failed;
+  document.getElementById('total').textContent=d.total;
+  document.getElementById('current').textContent=d.current?'Current: '+d.current:'';
+  document.getElementById('bar').style.width=d.total?(((d.sent+d.failed)/d.total)*100)+'%':'0%';
+  if(d.running)setTimeout(poll,1000);
+}
+refreshStatus();
+</script>
+</body>
+</html>

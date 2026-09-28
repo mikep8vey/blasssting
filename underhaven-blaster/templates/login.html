@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UnderHaven Blaster — Sign in</title>
+<link rel="icon" href="{{ url_for('static', filename='favicon.jpg') }}">
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#061022;color:#f4f8ff;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;display:grid;place-items:center}
+.card{width:min(430px,92vw);background:#0b1730;border:1px solid #244477;border-radius:24px;padding:34px;box-shadow:0 24px 80px #0008}
+.logo{width:86px;height:86px;border-radius:20px;display:block;margin:0 auto 18px;object-fit:cover}
+h1{text-align:center;margin:0;font-size:27px;letter-spacing:.04em}p{text-align:center;color:#9eb0cc;margin:8px 0 28px}
+label{display:block;font-size:13px;color:#b8c6db;margin:16px 0 7px}input{width:100%;padding:13px 14px;border-radius:12px;border:1px solid #2a4772;background:#071126;color:#fff;font-size:15px}
+button{width:100%;margin-top:22px;padding:13px;border:0;border-radius:12px;background:linear-gradient(90deg,#11e6ef,#236cff);color:#061022;font-weight:800;font-size:15px;cursor:pointer}
+.error{background:#431d2b;border:1px solid #a54c65;padding:10px;border-radius:10px;color:#ffd9e2;font-size:13px}
+small{display:block;text-align:center;color:#607493;margin-top:22px}
+</style>
+</head>
+<body>
+<main class="card">
+<img class="logo" src="{{ url_for('static', filename='logo.jpg') }}" alt="UnderHaven logo">
+<h1>UNDERHAVEN BLASTER</h1>
+<p>SMS management dashboard</p>
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+<form method="post">
+<label>Administrator username</label>
+<input name="username" autocomplete="username" required>
+<label>Password</label>
+<input type="password" name="password" autocomplete="current-password" required>
+<button type="submit">SIGN IN</button>
+</form>
+<small>Authorized access only</small>
+</main>
+</body>
+</html>
