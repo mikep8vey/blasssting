@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV="$APP_DIR/venv"
+ENV_FILE="$APP_DIR/.env"
+SERVICE_NAME="underhaven-blaster"
+SERVICE_USER="underhaven"
+NGINX_SITE="/etc/nginx/sites-available/$SERVICE_NAME"
+ACME_ROOT="/var/www/underhaven-blaster"
+
+printf "\n================================================\n"
+printf "       UNDERHAVEN BLASTER READY\n"
+printf "================================================\n\n"
+printf "HTTP URL:  %s\n" "$HTTP_URL"
+printf "HTTPS URL: %s\n" "$HTTPS_URL"
+printf "\nHTTP is configured to redirect to HTTPS.\n"
+printf "Flask: 127.0.0.1:5000 (private)\n"
+printf "Public ports: 80 and 443\n"
+printf "Port 5000: blocked/private\n"
+printf "\nTextbelt API key: configure it after login from the dashboard.\n"
+printf "\nServices:\n"
+printf "  systemctl status $SERVICE_NAME\n"
+printf "  systemctl status nginx\n"
+printf "  systemctl status $SERVICE_NAME-cert-renew.timer\n"
+printf "\n================================================\n"
