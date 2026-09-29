@@ -5,22 +5,377 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV="$APP_DIR/venv"
 ENV_FILE="$APP_DIR/.env"
 SERVICE_NAME="underhaven-blaster"
-SERVICE_USER="underhaven"
 NGINX_SITE="/etc/nginx/sites-available/$SERVICE_NAME"
 ACME_ROOT="/var/www/underhaven-blaster"
 
-printf "\n================================================\n"
-printf "       UNDERHAVEN BLASTER READY\n"
-printf "================================================\n\n"
-printf "HTTP URL:  %s\n" "$HTTP_URL"
-printf "HTTPS URL: %s\n" "$HTTPS_URL"
-printf "\nHTTP is configured to redirect to HTTPS.\n"
-printf "Flask: 127.0.0.1:5000 (private)\n"
-printf "Public ports: 80 and 443\n"
-printf "Port 5000: blocked/private\n"
-printf "\nTextbelt API key: configure it after login from the dashboard.\n"
-printf "\nServices:\n"
-printf "  systemctl status $SERVICE_NAME\n"
-printf "  systemctl status nginx\n"
-printf "  systemctl status $SERVICE_NAME-cert-renew.timer\n"
-printf "\n================================================\n"
+echo
+echo "================================================"
+echo "       UNDERHAVEN BLASTER INSTALLER"
+echo "================================================"
+echo
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "ERROR: Run this installer as root."
+    exit 1
+fi
+
+echo "[1/9] Installing system packages..."
+
+apt-get update
+
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    python3 \
+    python3-venv \
+    python3-pip \
+    nginx \
+    curl \
+    snapd \
+    ufw
+
+echo "[2/9] Creating Python virtual environment..."
+
+if [ ! -d "$VENV" ]; then
+    python3 -m venv "$VENV"
+fi
+
+source "$VENV/bin/activate"
+
+python -m pip install --upgrade pip
+python -m pip install -r "$APP_DIR/requirements.txt"
+
+echo "[3/9] Creating administrator account..."
+
+if [ ! -f "$ENV_FILE" ]; then
+
+    read -r -p "Administrator username [admin]: " ADMIN_USERNAME
+    ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
+
+    while true; do
+
+        read -r -s -p "Administrator password: " ADMIN_PASSWORD
+        echo
+
+        read -r -s -p "Confirm administrator password: " ADMIN_PASSWORD_CONFIRM
+        echo
+
+        if [ -z "$ADMIN_PASSWORD" ]; then
+            echo "Password cannot be empty."
+            continue
+        fi
+
+        if [ "$ADMIN_PASSWORD" != "$ADMIN_PASSWORD_CONFIRM" ]; then
+            echo "Passwords do not match."
+            continue
+        fi
+
+        break
+
+    done
+
+    FLASK_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+
+    ADMIN_PASSWORD_HASH="$(
+        ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+        "$VENV/bin/python" -c \
+        'import os; from werkzeug.security import generate_password_hash; print(generate_password_hash(os.environ["ADMIN_PASSWORD"]))'
+    )"
+
+    unset ADMIN_PASSWORD
+    unset ADMIN_PASSWORD_CONFIRM
+
+    cat > "$ENV_FILE" <<EOF
+BLASSS_TING_ADMIN_USERNAME=$ADMIN_USERNAME
+BLASSS_TING_ADMIN_PASSWORD_HASH=$ADMIN_PASSWORD_HASH
+FLASK_SECRET_KEY=$FLASK_SECRET_KEY
+TEXTBELT_API_KEY=
+CONTACT_FILE=contacts.txt
+SESSION_COOKIE_SECURE=true
+PORT=5000
+EOF
+
+    chmod 600 "$ENV_FILE"
+
+else
+
+    echo "Existing .env found. Keeping existing configuration."
+
+fi
+
+touch "$APP_DIR/contacts.txt"
+chmod 600 "$APP_DIR/contacts.txt"
+
+echo "[4/9] Creating application service..."
+
+# Create a dedicated service account.
+if ! id underhaven >/dev/null 2>&1; then
+    useradd \
+        --system \
+        --home "$APP_DIR" \
+        --shell /usr/sbin/nologin \
+        underhaven
+fi
+
+chown -R underhaven:underhaven "$APP_DIR"
+
+cat > "/etc/systemd/system/$SERVICE_NAME.service" <<EOF
+[Unit]
+Description=UnderHaven Blaster
+After=network.target
+
+[Service]
+Type=simple
+User=underhaven
+Group=underhaven
+
+WorkingDirectory=$APP_DIR
+
+EnvironmentFile=$ENV_FILE
+
+ExecStart=$VENV/bin/python $APP_DIR/main.py
+
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable "$SERVICE_NAME"
+systemctl restart "$SERVICE_NAME"
+
+echo "[5/9] Detecting public IPv4 address..."
+
+SERVER_IP="$(curl -4 -fsS --max-time 10 https://api.ipify.org || true)"
+
+if [ -z "$SERVER_IP" ]; then
+
+    read -r -p "Enter this server's public IPv4 address: " SERVER_IP
+
+fi
+
+if ! [[ "$SERVER_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    echo "ERROR: Invalid IPv4 address: $SERVER_IP"
+    exit 1
+fi
+
+HTTP_URL="http://$SERVER_IP/"
+HTTPS_URL="https://$SERVER_IP/"
+
+echo
+echo "Server IP: $SERVER_IP"
+echo
+
+echo "[6/9] Configuring Nginx..."
+
+mkdir -p "$ACME_ROOT/.well-known/acme-challenge"
+
+chown -R www-data:www-data "$ACME_ROOT"
+
+cat > "$NGINX_SITE" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name $SERVER_IP;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root $ACME_ROOT;
+        default_type text/plain;
+        try_files \$uri =404;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+
+ln -sf "$NGINX_SITE" "/etc/nginx/sites-enabled/$SERVICE_NAME"
+
+rm -f /etc/nginx/sites-enabled/default
+
+nginx -t
+systemctl enable nginx
+systemctl restart nginx
+
+echo "[7/9] Installing Certbot..."
+
+systemctl enable --now snapd.socket || true
+
+sleep 5
+
+if [ ! -x /snap/bin/certbot ]; then
+    snap install certbot --classic
+fi
+
+CERTBOT="/snap/bin/certbot"
+
+echo
+"$CERTBOT" --version
+echo
+
+# Certbot 5.4+ supports IP-address certificates.
+if ! "$CERTBOT" certonly --help all 2>&1 | grep -q -- "--ip-address"; then
+
+    echo "ERROR: Installed Certbot does not support IP certificates."
+    echo "Installed version:"
+    "$CERTBOT" --version
+
+    exit 1
+
+fi
+
+CERT_PATH="/etc/letsencrypt/live/$SERVER_IP/fullchain.pem"
+KEY_PATH="/etc/letsencrypt/live/$SERVER_IP/privkey.pem"
+
+if [ ! -f "$CERT_PATH" ] || [ ! -f "$KEY_PATH" ]; then
+
+    echo
+    echo "Requesting Let's Encrypt IP certificate..."
+    echo
+
+    "$CERTBOT" certonly \
+        --webroot \
+        --webroot-path "$ACME_ROOT" \
+        --ip-address "$SERVER_IP" \
+        --preferred-profile shortlived \
+        --agree-tos \
+        --register-unsafely-without-email \
+        --non-interactive \
+        --cert-name "$SERVER_IP"
+
+else
+
+    echo "Existing certificate found for $SERVER_IP."
+    echo "Using existing certificate."
+
+fi
+
+echo "[8/9] Configuring HTTPS..."
+
+cat > "$NGINX_SITE" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name $SERVER_IP;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root $ACME_ROOT;
+        default_type text/plain;
+        try_files \$uri =404;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+
+    server_name $SERVER_IP;
+
+    ssl_certificate $CERT_PATH;
+    ssl_certificate_key $KEY_PATH;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+
+nginx -t
+systemctl reload nginx
+
+echo "[9/9] Configuring firewall..."
+
+ufw allow OpenSSH
+ufw allow 80/tcp
+ufw allow 443/tcp
+
+ufw deny 5000/tcp
+
+ufw --force enable
+
+echo
+echo "Checking services..."
+
+systemctl is-active --quiet "$SERVICE_NAME" || {
+    echo "ERROR: UnderHaven Blaster service failed."
+    systemctl status "$SERVICE_NAME" --no-pager
+    exit 1
+}
+
+systemctl is-active --quiet nginx || {
+    echo "ERROR: Nginx failed."
+    systemctl status nginx --no-pager
+    exit 1
+}
+
+echo
+echo "================================================"
+echo "       UNDERHAVEN BLASTER READY"
+echo "================================================"
+echo
+echo "HTTP URL:  $HTTP_URL"
+echo "HTTPS URL: $HTTPS_URL"
+echo
+echo "HTTP automatically redirects to HTTPS."
+echo
+echo "Flask:"
+echo "  127.0.0.1:5000 (PRIVATE)"
+echo
+echo "Public:"
+echo "  80  HTTP"
+echo "  443 HTTPS"
+echo
+echo "Blocked:"
+echo "  5000"
+echo
+echo "Administrator login:"
+echo "  $ADMIN_USERNAME"
+echo
+echo "Textbelt API:"
+echo "  Configure it after logging into the dashboard."
+echo
+echo "SSL certificate:"
+echo "  $CERT_PATH"
+echo
+echo "Certificate renewal:"
+echo "  Certbot automatic renewal enabled."
+echo
+echo "================================================"
+echo
