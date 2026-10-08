@@ -1,0 +1,2 @@
+# Put one authorized recipient per line in contacts.txt
++15551234567
