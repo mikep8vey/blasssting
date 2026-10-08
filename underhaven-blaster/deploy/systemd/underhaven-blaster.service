@@ -1,0 +1,20 @@
+[Unit]
+Description=UnderHaven Blaster
+After=network.target
+
+[Service]
+Type=simple
+User=underhaven
+Group=underhaven
+WorkingDirectory=/opt/underhaven-blaster
+EnvironmentFile=/opt/underhaven-blaster/.env
+ExecStart=/opt/underhaven-blaster/venv/bin/python /opt/underhaven-blaster/main.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
